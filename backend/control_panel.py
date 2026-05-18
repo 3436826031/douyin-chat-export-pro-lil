@@ -321,7 +321,8 @@ async def start_scrape(req: ScrapeRequest):
     if _scrape_state["status"] == "running":
         return JSONResponse({"error": "Scrape already running"}, status_code=409)
 
-    if not _has_sessionid_in_profile():
+    probe = await _probe_login_state()
+    if not probe["has_cookies"]:
         return JSONResponse(
             {"error": "未检测到登录态，请先扫码登录或导入 Cookie"},
             status_code=400,
@@ -446,28 +447,58 @@ def _read_conv_list():
         return {"discovered_at": 0, "items": []}
 
 
-def _has_sessionid_in_profile() -> bool:
-    """Fast pre-check: read Chromium's Cookies SQLite directly to see if a
-    `sessionid` cookie exists for any douyin host. Avoids spawning a browser.
+_login_probe_lock = asyncio.Lock()
 
-    Returns False if the DB is missing, unreadable (locked by a running
-    Chromium), or has no matching row.
+
+async def _probe_login_state() -> dict:
+    """Single source of truth for whether the persistent profile is logged in.
+
+    Always launches Chromium against `_USER_DATA_DIR` and reads cookies via
+    Playwright. This intentionally goes through the same code path Chromium
+    uses internally so we never disagree with what the actual scraper sees
+    (whatever path the cookies DB lives at, WAL checkpoints, format
+    migrations — all handled by Chromium itself).
+
+    Returns one of:
+        {"status": "logged_in",  "has_cookies": True}
+        {"status": "expired",    "has_cookies": False}
+        {"status": "no_profile", "has_cookies": False}
+        {"status": "error",      "has_cookies": False, "message": "..."}
+
+    Serialized via a module-level lock so the badge poll and the
+    refresh/scrape preconditions can't race to launch two Chromium
+    instances on the same profile (which would lock-conflict).
     """
-    db_path = os.path.join(_USER_DATA_DIR, "Default", "Cookies")
-    if not os.path.isfile(db_path):
-        return False
-    import sqlite3
-    try:
-        # uri=ro to avoid taking a write lock; immutable=1 lets us read even
-        # while another process holds locks.
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro&immutable=1", uri=True, timeout=1)
-        row = conn.execute(
-            "SELECT 1 FROM cookies WHERE name = 'sessionid' AND host_key LIKE '%douyin%' LIMIT 1"
-        ).fetchone()
-        conn.close()
-        return row is not None
-    except Exception:
-        return False
+    async with _login_probe_lock:
+        has_profile = os.path.isdir(_USER_DATA_DIR) and os.listdir(_USER_DATA_DIR)
+        if not has_profile:
+            return {"status": "no_profile", "has_cookies": False}
+        try:
+            from playwright.async_api import async_playwright
+            pw = await async_playwright().start()
+            try:
+                ctx = await pw.chromium.launch_persistent_context(
+                    _USER_DATA_DIR, headless=True,
+                    viewport={"width": 1400, "height": 900}, locale="zh-CN",
+                    args=["--disable-blink-features=AutomationControlled"],
+                )
+                try:
+                    page = ctx.pages[0] if ctx.pages else await ctx.new_page()
+                    await page.goto("https://www.douyin.com/", wait_until="domcontentloaded")
+                    await asyncio.sleep(2)
+                    cookies = await ctx.cookies("https://www.douyin.com")
+                    cookie_names = {c["name"] for c in cookies}
+                    has_login = "sessionid" in cookie_names
+                    return {
+                        "status": "logged_in" if has_login else "expired",
+                        "has_cookies": has_login,
+                    }
+                finally:
+                    await ctx.close()
+            finally:
+                await pw.stop()
+        except Exception as e:
+            return {"status": "error", "has_cookies": False, "message": str(e)}
 
 
 @control_router.post("/api/conversations/refresh")
@@ -478,9 +509,11 @@ async def refresh_conversations():
     if _scrape_state["status"] == "running":
         return JSONResponse({"error": "Scraper is running — stop it first"}, status_code=409)
 
-    # Fast pre-check: don't spawn the 3-minute browser wait if we already
-    # know there's no usable session.
-    if not _has_sessionid_in_profile():
+    # Pre-check: don't spawn the 3-minute browser wait if we already know
+    # there's no usable session. Uses the same Playwright probe as the
+    # login badge so the two never disagree.
+    probe = await _probe_login_state()
+    if not probe["has_cookies"]:
         return JSONResponse(
             {"error": "未检测到登录态，请先扫码登录或导入 Cookie"},
             status_code=400,
@@ -867,30 +900,7 @@ _login_state = {
 @control_router.get("/api/login/check")
 async def login_check():
     """Check login by actually opening browser and reading cookies."""
-    has_profile = os.path.isdir(_USER_DATA_DIR) and os.listdir(_USER_DATA_DIR)
-    if not has_profile:
-        return {"status": "no_profile", "has_cookies": False}
-
-    # Quick cookie check via Playwright
-    try:
-        from playwright.async_api import async_playwright
-        pw = await async_playwright().start()
-        ctx = await pw.chromium.launch_persistent_context(
-            _USER_DATA_DIR, headless=True,
-            viewport={"width": 1400, "height": 900}, locale="zh-CN",
-            args=["--disable-blink-features=AutomationControlled"],
-        )
-        page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-        await page.goto("https://www.douyin.com/", wait_until="domcontentloaded")
-        await asyncio.sleep(2)
-        cookies = await ctx.cookies("https://www.douyin.com")
-        cookie_names = {c["name"] for c in cookies}
-        has_login = "sessionid" in cookie_names
-        await ctx.close()
-        await pw.stop()
-        return {"status": "logged_in" if has_login else "expired", "has_cookies": has_login}
-    except Exception as e:
-        return {"status": "error", "has_cookies": False, "message": str(e)}
+    return await _probe_login_state()
 
 
 @control_router.post("/api/login/start")
