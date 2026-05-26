@@ -169,6 +169,106 @@ async def password_status():
     return {"has_password": bool(cfg.get("password_hash"))}
 
 
+# ── Notifications (Server酱 / sct.ftqq.com) ──
+
+class NotifyKeyRequest(BaseModel):
+    sendkey: str = ""  # empty = remove
+
+
+def _send_serverchan_sync(sendkey: str, title: str, desp: str) -> tuple[bool, str]:
+    """Blocking POST to Server酱. Returns (ok, message)."""
+    import urllib.request
+    import urllib.parse
+
+    url = f"https://sctapi.ftqq.com/{sendkey}.send"
+    data = urllib.parse.urlencode({"title": title, "desp": desp}).encode("utf-8")
+    req = urllib.request.Request(url, data=data, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+            try:
+                payload = json.loads(body)
+                # Server酱 turbo returns {"code":0,...}; legacy returns {"errno":0,...}
+                code = payload.get("code", payload.get("errno", -1))
+                if code == 0:
+                    return True, "已发送"
+                return False, f"Server酱返回错误: {payload.get('message') or body[:200]}"
+            except json.JSONDecodeError:
+                return False, f"Server酱响应非 JSON: {body[:200]}"
+    except Exception as e:
+        return False, f"请求失败: {e}"
+
+
+def _build_failure_desp(reason: str, log_path: str | None = None, tail: int = 20) -> str:
+    """Markdown body for failure notifications: timestamp, reason, last N log lines."""
+    import datetime
+    ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    parts = [
+        f"**失败时间**: {ts}",
+        f"**原因**: {reason or '未知错误'}",
+    ]
+    if log_path and os.path.exists(log_path):
+        try:
+            with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+                lines = f.readlines()
+            log_excerpt = "".join(lines[-tail:]).rstrip()
+            if log_excerpt:
+                parts.append("**日志末尾**:\n```\n" + log_excerpt + "\n```")
+        except Exception:
+            pass
+    return "\n\n".join(parts)
+
+
+async def _notify_on_failure(title: str, desp: str) -> None:
+    """Fire-and-forget notification. Reads sendkey from config; silently no-ops if not set."""
+    cfg = _load_config()
+    sendkey = (cfg.get("notify_serverchan_key") or "").strip()
+    if not sendkey:
+        return
+    try:
+        ok, msg = await asyncio.to_thread(_send_serverchan_sync, sendkey, title, desp)
+        if not ok:
+            print(f"[!] 通知发送失败: {msg}")
+    except Exception as e:
+        print(f"[!] 通知发送异常: {e}")
+
+
+@control_router.post("/api/notify/serverchan")
+async def set_notify_key(req: NotifyKeyRequest):
+    cfg = _load_config()
+    key = req.sendkey.strip()
+    if key:
+        cfg["notify_serverchan_key"] = key
+        _save_config(cfg)
+        return {"status": "ok", "message": "SendKey 已保存"}
+    cfg.pop("notify_serverchan_key", None)
+    _save_config(cfg)
+    return {"status": "ok", "message": "SendKey 已清除"}
+
+
+@control_router.get("/api/notify/serverchan/status")
+async def notify_status():
+    cfg = _load_config()
+    return {"has_key": bool(cfg.get("notify_serverchan_key"))}
+
+
+@control_router.post("/api/notify/test")
+async def notify_test():
+    cfg = _load_config()
+    sendkey = (cfg.get("notify_serverchan_key") or "").strip()
+    if not sendkey:
+        return JSONResponse(
+            status_code=400,
+            content={"status": "error", "message": "未配置 SendKey"},
+        )
+    ok, msg = await asyncio.to_thread(
+        _send_serverchan_sync, sendkey,
+        "抖音聊天导出 · 测试通知",
+        "如果你收到这条消息，说明 Server酱 配置正常。",
+    )
+    return {"status": "ok" if ok else "error", "message": msg}
+
+
 # ── Media download toggle + backfill ──
 
 class DownloadImagesToggle(BaseModel):
@@ -393,6 +493,11 @@ async def _run_scrape(cmd):
     finally:
         _scrape_state["finished_at"] = time.time()
         _scrape_state["process"] = None
+        if _scrape_state["status"] == "failed":
+            asyncio.create_task(_notify_on_failure(
+                "抖音聊天导出 · 采集失败",
+                _build_failure_desp(_scrape_state["message"], LOG_PATH),
+            ))
 
 
 @control_router.get("/api/scrape/log")
@@ -1809,6 +1914,21 @@ select:focus, input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px v
     <div class="meta" id="pwStatus" style="margin-top:6px"></div>
   </div>
 
+  <div class="section">
+    <h2 data-i18n="notifyTitle">通知</h2>
+    <div class="meta" style="margin-bottom:8px">
+      <span data-i18n="notifyDesc">采集失败时通过 Server酱 推送到微信。</span>
+      <a href="https://sct.ftqq.com" target="_blank" rel="noopener">sct.ftqq.com</a>
+    </div>
+    <div class="row">
+      <input type="password" id="notifyKeyInput" data-i18n-placeholder="notifyPlaceholder" placeholder="SCT... SendKey" style="flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg)">
+      <button class="btn btn-primary" onclick="saveNotifyKey()" data-i18n="setBtn">设置</button>
+      <button class="btn" onclick="clearNotifyKey()" data-i18n="clearBtn">清除</button>
+      <button class="btn" onclick="testNotify()" data-i18n="notifyTestBtn">测试</button>
+    </div>
+    <div class="meta" id="notifyStatus" style="margin-top:6px"></div>
+  </div>
+
 </div>
 
 <script>
@@ -1870,6 +1990,13 @@ const T = {
     passwordEmpty: '请输入密码',
     noPasswordSet: '未设置密码（查看器公开）',
     passwordIsSet: '密码已设置',
+    notifyTitle: '通知',
+    notifyDesc: '采集失败时通过 Server酱 推送到微信。',
+    notifyPlaceholder: 'SCT... SendKey',
+    notifyTestBtn: '测试',
+    notifyKeySet: '已配置 SendKey',
+    notifyKeyEmpty: '未配置 SendKey',
+    notifyKeyMissing: '请先粘贴 SendKey',
     startedAt: '开始: ',
     finishedAt: '完成: ',
     noOutput: '(无输出)',
@@ -1954,6 +2081,13 @@ const T = {
     passwordEmpty: 'Please enter a password',
     noPasswordSet: 'No password set (viewer is public)',
     passwordIsSet: 'Password is set',
+    notifyTitle: 'Notifications',
+    notifyDesc: 'Push a notice to WeChat via Server酱 when scraping fails.',
+    notifyPlaceholder: 'SCT... SendKey',
+    notifyTestBtn: 'Test',
+    notifyKeySet: 'SendKey configured',
+    notifyKeyEmpty: 'No SendKey configured',
+    notifyKeyMissing: 'Paste a SendKey first',
     startedAt: 'Started: ',
     finishedAt: 'Finished: ',
     noOutput: '(no output)',
@@ -2443,6 +2577,37 @@ async function clearPassword() {
   setDynText(document.getElementById('pwStatus'), d.message);
 }
 
+/* ── Notifications (Server酱) ── */
+async function loadNotifyStatus() {
+  const r = await fetch('/panel/api/notify/serverchan/status');
+  const d = await r.json();
+  setText(document.getElementById('notifyStatus'), d.has_key ? 'notifyKeySet' : 'notifyKeyEmpty');
+}
+async function saveNotifyKey() {
+  const k = document.getElementById('notifyKeyInput').value.trim();
+  if (!k) { setText(document.getElementById('notifyStatus'), 'notifyKeyMissing'); return; }
+  const r = await fetch('/panel/api/notify/serverchan', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ sendkey: k }),
+  });
+  const d = await r.json();
+  setDynText(document.getElementById('notifyStatus'), d.message);
+  document.getElementById('notifyKeyInput').value = '';
+}
+async function clearNotifyKey() {
+  const r = await fetch('/panel/api/notify/serverchan', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ sendkey: '' }),
+  });
+  const d = await r.json();
+  setDynText(document.getElementById('notifyStatus'), d.message);
+}
+async function testNotify() {
+  const r = await fetch('/panel/api/notify/test', { method: 'POST' });
+  const d = await r.json();
+  setDynText(document.getElementById('notifyStatus'), d.message);
+}
+
 /* ── Login ── */
 let loginPollTimer = null;
 
@@ -2669,6 +2834,7 @@ async function panelAuthCheck() {
       loadDiscoverLog();
       loadStatus();
       loadPasswordStatus();
+      loadNotifyStatus();
       loadDownloadImages();
       pollBackfill();
       setInterval(loadStatus, 5000);
