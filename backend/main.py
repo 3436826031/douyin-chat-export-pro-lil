@@ -31,10 +31,10 @@ def _get_password_hash() -> str | None:
     """Read password hash from config."""
     import json
     try:
-        with open(_CONFIG_PATH) as f:
+        with open(_CONFIG_PATH, encoding="utf-8") as f:
             cfg = json.load(f)
         return cfg.get("password_hash") or None
-    except (FileNotFoundError, json.JSONDecodeError):
+    except (FileNotFoundError, json.JSONDecodeError, UnicodeDecodeError):
         return None
 
 

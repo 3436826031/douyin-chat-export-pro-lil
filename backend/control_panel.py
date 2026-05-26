@@ -19,15 +19,25 @@ _CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", 
 
 def _load_config():
     if os.path.exists(_CONFIG_PATH):
-        with open(_CONFIG_PATH) as f:
-            return json.load(f)
+        try:
+            with open(_CONFIG_PATH, encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            # Don't let a corrupted config file block service startup —
+            # fall back to defaults and let the next save overwrite it.
+            print(f"[!] panel_config.json 损坏 ({e})，使用默认配置")
+            return {"custom_filters": [], "schedule": ""}
     return {"custom_filters": [], "schedule": ""}
 
 
 def _save_config(cfg):
     os.makedirs(os.path.dirname(_CONFIG_PATH), exist_ok=True)
-    with open(_CONFIG_PATH, "w") as f:
+    # Atomic write: serialize to tmp file then rename, so a crash mid-write
+    # (e.g. UnicodeEncodeError on Windows gbk) can't leave a half-written file.
+    tmp_path = _CONFIG_PATH + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False)
+    os.replace(tmp_path, _CONFIG_PATH)
 
 
 # ── Scrape job state ──
@@ -390,7 +400,7 @@ async def scrape_log(lines: int = 50):
     if not os.path.exists(LOG_PATH):
         return {"log": ""}
     try:
-        with open(LOG_PATH, "r", errors="replace") as f:
+        with open(LOG_PATH, "r", encoding="utf-8", errors="replace") as f:
             all_lines = f.readlines()
         tail = all_lines[-lines:] if len(all_lines) > lines else all_lines
         return {"log": "".join(tail)}
@@ -403,7 +413,7 @@ async def discover_log(lines: int = 80):
     if not os.path.exists(DISCOVER_LOG_PATH):
         return {"log": ""}
     try:
-        with open(DISCOVER_LOG_PATH, "r", errors="replace") as f:
+        with open(DISCOVER_LOG_PATH, "r", encoding="utf-8", errors="replace") as f:
             all_lines = f.readlines()
         tail = all_lines[-lines:] if len(all_lines) > lines else all_lines
         return {"log": "".join(tail)}
