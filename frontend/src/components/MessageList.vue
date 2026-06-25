@@ -8,12 +8,17 @@
       <div class="msg-header">
         <h3>{{ conversation.name || '未命名' }}</h3>
         <span class="msg-total">{{ total }} 条消息</span>
-        <button v-if="!selfUid && senders.length === 2" class="msg-pick-self" @click="showPicker = true">
-          设置"我"
-        </button>
-        <button v-if="selfUid" class="msg-pick-self picked" @click="showPicker = true">
-          我: {{ selfUid.slice(-4) }}
-        </button>
+        <div class="msg-header-actions">
+          <button class="msg-export-btn" @click="exportChat" :disabled="exporting">
+            {{ exporting ? '导出中...' : '📥 导出' }}
+          </button>
+          <button v-if="!selfUid && senders.length === 2" class="msg-pick-self" @click="showPicker = true">
+            设置"我"
+          </button>
+          <button v-if="selfUid" class="msg-pick-self picked" @click="showPicker = true">
+            我: {{ selfUid.slice(-4) }}
+          </button>
+        </div>
       </div>
 
       <!-- UID 选择弹窗 -->
@@ -221,6 +226,43 @@ const listRef = ref(null)
 const senders = ref([])
 const selfUid = ref(localStorage.getItem('selfUid') || '')
 const showPicker = ref(false)
+const exporting = ref(false)
+
+// 导出聊天记录
+async function exportChat() {
+  if (!props.conversation || exporting.value) return
+
+  exporting.value = true
+  try {
+    const res = await fetch(`/api/conversations/${props.conversation.conv_id}/export?format=jsonl`)
+    if (!res.ok) {
+      throw new Error('导出失败')
+    }
+
+    // 获取文件名
+    const disposition = res.headers.get('Content-Disposition')
+    let filename = `${props.conversation.name || 'chat'}.jsonl`
+    if (disposition) {
+      const match = disposition.match(/filename="?(.+?)"?$/)
+      if (match) filename = match[1]
+    }
+
+    // 下载文件
+    const blob = await res.blob()
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    window.URL.revokeObjectURL(url)
+  } catch (err) {
+    alert('导出失败: ' + err.message)
+  } finally {
+    exporting.value = false
+  }
+}
 
 // 用户信息缓存 { uid: { nickname, avatar_url, unique_id } }
 const userCache = reactive({})

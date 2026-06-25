@@ -181,6 +181,130 @@ def list_senders(conv_id: str):
     return database.get_senders(conv_id)
 
 
+@app.get("/api/conversations/{conv_id}/dates")
+def list_message_dates(conv_id: str):
+    """获取会话中有消息的日期列表"""
+    conv = database.get_conversation(conv_id)
+    if not conv:
+        raise HTTPException(404, "会话不存在")
+    return database.get_message_dates(conv_id)
+
+
+@app.get("/api/conversations/{conv_id}/messages/by-date")
+def list_messages_by_date(
+    conv_id: str,
+    date: str = Query(..., description="日期，格式 YYYY-MM-DD"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=1, le=500),
+):
+    """获取指定日期的消息"""
+    conv = database.get_conversation(conv_id)
+    if not conv:
+        raise HTTPException(404, "会话不存在")
+    items, total = database.get_messages_by_date(conv_id, date, page=page, page_size=page_size)
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+
+@app.get("/api/conversations/{conv_id}/media")
+def list_media_messages(
+    conv_id: str,
+    type: str = Query(None, description="媒体类型: image, video, voice, share"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+):
+    """获取媒体消息"""
+    conv = database.get_conversation(conv_id)
+    if not conv:
+        raise HTTPException(404, "会话不存在")
+    items, total = database.get_media_messages(conv_id, msg_type=type, page=page, page_size=page_size)
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+
+@app.get("/api/conversations/{conv_id}/stats/messages")
+def get_message_stats(
+    conv_id: str,
+    period: str = Query('day', description="统计周期: day, month, year"),
+):
+    """按时间段统计消息数量"""
+    conv = database.get_conversation(conv_id)
+    if not conv:
+        raise HTTPException(404, "会话不存在")
+    return database.get_message_stats_by_period(conv_id, period)
+
+
+@app.get("/api/conversations/{conv_id}/stats/senders")
+def get_sender_stats(conv_id: str):
+    """统计发送者消息数量"""
+    conv = database.get_conversation(conv_id)
+    if not conv:
+        raise HTTPException(404, "会话不存在")
+    return database.get_sender_stats(conv_id)
+
+
+@app.get("/api/conversations/{conv_id}/stats/media")
+def get_media_stats(conv_id: str):
+    """统计消息类型分布"""
+    conv = database.get_conversation(conv_id)
+    if not conv:
+        raise HTTPException(404, "会话不存在")
+    return database.get_media_stats(conv_id)
+
+
+@app.get("/api/conversations/{conv_id}/stats/hourly")
+def get_hourly_stats(conv_id: str):
+    """按小时统计消息分布"""
+    conv = database.get_conversation(conv_id)
+    if not conv:
+        raise HTTPException(404, "会话不存在")
+    return database.get_hourly_stats(conv_id)
+
+
+@app.get("/api/conversations/{conv_id}/export")
+def export_conversation(
+    conv_id: str,
+    format: str = Query('jsonl', description="导出格式: json, jsonl"),
+):
+    """导出单个会话的聊天记录"""
+    from fastapi.responses import StreamingResponse
+    import io
+
+    conv = database.get_conversation(conv_id)
+    if not conv:
+        raise HTTPException(404, "会话不存在")
+
+    from extractor.exporter import ChatLabExporter
+    import tempfile
+    import os
+
+    # 创建临时文件
+    ext = '.json' if format == 'json' else '.jsonl'
+    temp_path = os.path.join(tempfile.gettempdir(), f"export_{conv_id}{ext}")
+
+    try:
+        exporter = ChatLabExporter(conv_name=conv['name'], output_format=format)
+        exporter.export(temp_path)
+
+        # 读取文件内容
+        with open(temp_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        # 返回文件
+        filename = f"{conv['name'] or 'chat'}{ext}"
+        media_type = 'application/json' if format == 'json' else 'application/x-ndjson'
+
+        return StreamingResponse(
+            io.BytesIO(content.encode('utf-8')),
+            media_type=media_type,
+            headers={
+                'Content-Disposition': f'attachment; filename="{filename}"',
+            }
+        )
+    finally:
+        # 清理临时文件
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+
 @app.get("/api/search")
 def search(
     q: str = Query(..., min_length=1),

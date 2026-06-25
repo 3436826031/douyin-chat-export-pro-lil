@@ -3,11 +3,17 @@ import { ref, onMounted } from 'vue'
 import ConversationList from './components/ConversationList.vue'
 import MessageList from './components/MessageList.vue'
 import SearchBar from './components/SearchBar.vue'
+import ChatExplorer from './components/ChatExplorer.vue'
+import GlobalSearch from './components/GlobalSearch.vue'
+import ChatStats from './components/ChatStats.vue'
 
 const activeConversation = ref(null)
 const searchHighlight = ref('')
 const jumpToSeq = ref(null)
 const sidebarOpen = ref(false)
+const showExplorer = ref(false)
+const showGlobalSearch = ref(false)
+const showStats = ref(false)
 
 // Auth
 const authChecking = ref(true)
@@ -142,6 +148,23 @@ function navigateToMessage(item) {
       <div class="app-toolbar">
         <button class="sidebar-toggle" @click="sidebarOpen = !sidebarOpen">☰</button>
         <div class="app-title">抖音聊天记录</div>
+        <button class="global-search-btn" @click="showGlobalSearch = true">
+          🔍 全局搜索
+        </button>
+        <button
+          v-if="activeConversation"
+          class="explorer-btn"
+          @click="showExplorer = true"
+        >
+          📋 聊天记录
+        </button>
+        <button
+          v-if="activeConversation"
+          class="stats-btn"
+          @click="showStats = true"
+        >
+          📊 统计
+        </button>
         <SearchBar @navigate="navigateToMessage" />
         <div class="theme-switcher">
           <button
@@ -162,6 +185,28 @@ function navigateToMessage(item) {
         @jumped="jumpToSeq = null"
       />
     </div>
+
+    <!-- 聊天记录查看器 -->
+    <ChatExplorer
+      v-if="showExplorer && activeConversation"
+      :conversation="activeConversation"
+      @close="showExplorer = false"
+      @navigate="navigateToMessage"
+    />
+
+    <!-- 全局搜索 -->
+    <GlobalSearch
+      v-if="showGlobalSearch"
+      @close="showGlobalSearch = false"
+      @navigate="navigateToMessage"
+    />
+
+    <!-- 统计 -->
+    <ChatStats
+      v-if="showStats && activeConversation"
+      :conversation="activeConversation"
+      @close="showStats = false"
+    />
   </div>
 </template>
 
@@ -265,6 +310,30 @@ function navigateToMessage(item) {
   font-size: 15px;
   font-weight: 600;
   white-space: nowrap;
+  color: var(--accent);
+}
+
+.explorer-btn,
+.global-search-btn,
+.stats-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+
+.explorer-btn:hover,
+.global-search-btn:hover,
+.stats-btn:hover {
+  border-color: var(--accent);
   color: var(--accent);
 }
 
