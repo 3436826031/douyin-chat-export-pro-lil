@@ -351,6 +351,7 @@ if os.path.isdir(_frontend_dist):
     app.mount("/assets", StaticFiles(directory=os.path.join(_frontend_dist, "assets")), name="assets")
 
     _index_html = os.path.join(_frontend_dist, "index.html")
+    _mobile_html = os.path.join(_frontend_dist, "mobile.html")
 
     @app.get("/favicon.svg")
     def serve_favicon():
@@ -358,6 +359,12 @@ if os.path.isdir(_frontend_dist):
 
     @app.get("/")
     def serve_frontend_root():
+        return FileResponse(_index_html)
+
+    @app.get("/mobile")
+    def serve_mobile():
+        if os.path.isfile(_mobile_html):
+            return FileResponse(_mobile_html)
         return FileResponse(_index_html)
 
     @app.get("/{full_path:path}")
