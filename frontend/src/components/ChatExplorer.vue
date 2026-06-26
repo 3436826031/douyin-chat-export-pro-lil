@@ -1169,10 +1169,32 @@ function onImgError(e) {
 }
 
 @media (max-width: 768px) {
+  .explorer-overlay {
+    background: #fff;
+  }
+
   .explorer-panel {
     width: 100vw;
     height: 100vh;
     border-radius: 0;
+    max-width: none;
+    max-height: none;
+  }
+
+  .explorer-header {
+    padding: 12px 16px;
+  }
+
+  .explorer-tabs {
+    padding: 8px 12px;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+  }
+
+  .explorer-tab {
+    flex-shrink: 0;
+    padding: 6px 12px;
+    font-size: 12px;
   }
 
   .date-view {
@@ -1183,12 +1205,20 @@ function onImgError(e) {
     width: 100%;
     border-right: none;
     border-bottom: 1px solid var(--border-color);
-    max-height: 350px;
+    max-height: 300px;
+  }
+
+  .calendar {
+    padding: 8px;
+  }
+
+  .cal-day {
+    font-size: 11px;
   }
 
   .date-list {
     width: 100%;
-    max-height: 120px;
+    max-height: 100px;
     border-right: none;
     border-bottom: 1px solid var(--border-color);
     display: flex;
@@ -1199,11 +1229,37 @@ function onImgError(e) {
 
   .date-item {
     flex-shrink: 0;
-    padding: 8px 16px;
+    padding: 8px 12px;
+    font-size: 12px;
+  }
+
+  .messages-scroll {
+    padding: 8px;
+  }
+
+  .explorer-msg {
+    padding: 8px;
+  }
+
+  .msg-thumb {
+    max-width: 150px;
+    max-height: 150px;
   }
 
   .media-grid {
-    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4px;
+    padding: 8px;
+  }
+
+  .voice-list,
+  .share-list {
+    padding: 8px;
+  }
+
+  .voice-item,
+  .share-item {
+    padding: 10px;
   }
 }
 </style>

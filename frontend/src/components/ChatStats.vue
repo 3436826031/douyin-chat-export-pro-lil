@@ -905,10 +905,20 @@ watch(() => props.conversation, () => {
 }
 
 @media (max-width: 768px) {
+  .stats-overlay {
+    background: #fff;
+  }
+
   .stats-panel {
     width: 100vw;
     height: 100vh;
     border-radius: 0;
+    max-width: none;
+    max-height: none;
+  }
+
+  .stats-header {
+    padding: 12px 16px;
   }
 
   .stats-tabs {
@@ -919,10 +929,81 @@ watch(() => props.conversation, () => {
 
   .stats-tab {
     flex-shrink: 0;
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+
+  .stats-content {
+    padding: 12px;
+  }
+
+  .chart-container {
+    padding: 12px;
+  }
+
+  .line-chart {
+    height: 180px;
+  }
+
+  .chart-summary {
+    gap: 16px;
+    margin-top: 12px;
+  }
+
+  .summary-value {
+    font-size: 16px;
+  }
+
+  .pie-container {
+    padding: 16px;
+  }
+
+  .pie-chart svg {
+    width: 150px;
+    height: 150px;
+  }
+
+  .pie-center-text {
+    font-size: 20px;
+  }
+
+  .legend-item {
+    padding: 6px;
+    gap: 6px;
+  }
+
+  .legend-name {
+    font-size: 12px;
+  }
+
+  .legend-count,
+  .legend-percent {
+    font-size: 12px;
   }
 
   .type-grid {
     grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+
+  .type-card {
+    padding: 12px;
+  }
+
+  .type-icon {
+    font-size: 24px;
+  }
+
+  .type-count {
+    font-size: 20px;
+  }
+
+  .hourly-chart {
+    height: 150px;
+  }
+
+  .hourly-summary {
+    gap: 16px;
   }
 }
 </style>
